@@ -65,7 +65,6 @@ class SettingFormatter:
 
         self.set_input_file(input_file, overwrite)
         return True
-
     def tokenize_lines(self, lines):
         """各行をトークン化"""
         return [
@@ -151,22 +150,6 @@ class SettingFormatter:
 
         return ' '.join(result_tokens).strip()
 
-    def _is_already_formatted(self, lines, current_line):
-        """既に整形済みかを判定"""
-        if current_line >= len(lines) - 1:
-            return False
-        return (lines[current_line].strip().endswith(' =') and
-                lines[current_line + 1].strip().startswith('"'))
-
-    def _find_formatted_block_end(self, lines, start_line):
-        """整形済みブロックの終了行を特定"""
-        if start_line >= len(lines):
-            return None
-        for i in range(start_line + 1, len(lines)):
-            if lines[i].strip().endswith(','):
-                return i
-        return None
-
     def process_file(self):
         """メイン処理"""
         if not self.input_file or not self.output_file:
@@ -190,35 +173,24 @@ class SettingFormatter:
 
         # 整形処理
         fixed_lines = []
-        skip_until = -1  # スキップする行の終了位置
         for i, line in enumerate(lines):
-            if i < skip_until:
-                fixed_lines.append(line)
-                continue
-
             if i in target_by_line:
-                # 既に整形済みか確認
-                if self._is_already_formatted(lines, i):
-                    end_line = self._find_formatted_block_end(lines, i)
-                    if end_line is not None:
-                        fixed_lines.extend(lines[i:end_line + 1])
-                        skip_until = end_line + 1
+                for target in target_by_line[i]:
+                    indent = target['parent_indent'] + '    '
+
+                    if target['parent_line'] == target['target_line']:
+                        # 親ノードと同じ行の場合
+                        parent_part = self.join_tokens_until_key(line_tokens[i], target['key'])
+                        fixed_lines.append(f"{target['parent_indent']}{parent_part}\n")
+                        fixed_lines.extend(
+                            self.format_string_literal(indent, f"{target['key']} =", target['value'])
+                        )
+                        fixed_lines.append(f"{target['parent_indent']}}},\n")
                     else:
-                        fixed_lines.append(line)
-                else:
-                    for target in target_by_line[i]:
-                        indent = target['parent_indent'] + '    '
-                        # キーと文字列リテラルが同じ行にある場合のみ整形
-                        if target['parent_line'] == target['target_line']:
-                            parent_part = self.join_tokens_until_key(line_tokens[i], target['key'])
-                            fixed_lines.append(f"{target['parent_indent']}{parent_part}\n")
-                            fixed_lines.extend(
-                                self.format_string_literal(indent, f"{target['key']} =", target['value'])
-                            )
-                            fixed_lines.append(f"{target['parent_indent']}}},\n")
-                        else:
-                            # 同じ行にない場合はスキップ
-                            fixed_lines.append(line)
+                        # 別行の場合
+                        fixed_lines.extend(
+                            self.format_string_literal(indent, f"{target['key']} =", target['value'])
+                        )
             else:
                 fixed_lines.append(line)
 
@@ -237,7 +209,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description='設定ファイルの文字列リテラル整形ツール',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
+        epilog =
+'''
 使用例:
 python formatter.py                          # 対話式実行
 python formatter.py config.setting           # 別名保存
@@ -247,14 +220,10 @@ python formatter.py config.setting --backup  # バックアップ付き上書き
     )
 
     parser.add_argument('file', nargs='?', help='処理対象のファイルパス')
-    parser.add_argument(
-        '-o', '--overwrite', action='store_true',
-        help='上書き保存（デフォルトは別名保存）'
-    )
-    parser.add_argument(
-        '--backup', action='store_true',
-        help='上書き前にバックアップを作成（.bakファイル）'
-    )
+    parser.add_argument('-o', '--overwrite', action='store_true',
+    help = '上書き保存（デフォルトは別名保存）')
+    parser.add_argument('--backup', action='store_true',
+    help = '上書き前にバックアップを作成（.bakファイル）')
 
     return parser.parse_args()
 
@@ -270,8 +239,6 @@ def create_backup(file_path):
     except Exception as e:
         print(f"バックアップ作成失敗: {e}")
         return False
-
-
 def main():
     """メイン関数"""
     args = parse_arguments()
