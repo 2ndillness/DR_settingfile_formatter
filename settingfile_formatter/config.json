@@ -1,7 +1,7 @@
 {
   "formatters": {
     "instance_input": "formatters.instance_input.InstanceInputFormatter",
-    "string_literal": "formatters.string_literal.StringLiteralFormatter",
-    "user_controls": "formatters.user_controls.UserControlsFormatter"
+    "user_controls": "formatters.user_controls.UserControlsFormatter",
+    "string_literal": "formatters.string_literal.StringLiteralFormatter"
   }
 }
