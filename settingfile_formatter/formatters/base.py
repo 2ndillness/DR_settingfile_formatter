@@ -7,7 +7,7 @@ class Tokenizer:
     """トークン化の共通処理を提供するクラス"""
 
     TOKEN_PATTERN = r'([a-zA-Z_][a-zA-Z0-9_.]*)|(".*?[^\\]")|([-+]?\d*\.?\d+)|([{}(),=\[\]])'
-    INDENT = "    "
+    INDENT = '    '
 
     def __init__(self):
         self.pattern = re.compile(self.TOKEN_PATTERN)
