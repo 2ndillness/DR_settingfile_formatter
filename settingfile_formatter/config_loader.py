@@ -30,21 +30,19 @@ class ConfigLoader:
     def get_formatter_choices(self) -> List[str]:
         return list(self._formatters_config.keys()) + ['all']
 
-    def get_rule_names_from_choices(self, choices: List[str]) -> List[str]:
+    def get_rule_names(self, choices: List[str]) -> List[str]:
         """ユーザーの選択肢（番号リスト）を検証し、ルール名のリストに変換する"""
         if self._all_choice_num in choices:
             return ['all']
 
         valid_choices = set(self._rule_map.keys())
-        selected_rules = []
+        selected_rules = set()
         for choice in choices:
             if choice not in valid_choices:
                 raise ValueError(f"'{choice}' は有効な選択肢ではありません")
-            rule_name = self._rule_map[choice]
-            if rule_name not in selected_rules:
-                selected_rules.append(rule_name)
+            selected_rules.add(self._rule_map[choice])
 
-        return selected_rules
+        return list(selected_rules)
 
     def _get_formatter_instance(self, rule_name: str) -> Any:
         if rule_name not in self._formatters_config:
@@ -58,12 +56,14 @@ class ConfigLoader:
         except (ImportError, AttributeError) as e:
             raise FormatterError(f"整形ルール '{rule_name}' のクラス読み込みに失敗しました") from e
 
-    def get_formatters_by_rules(self, rule_names: List[str]) -> List[Any]:
+    def get_formatters(self, rule_names: List[str]) -> List[Any]:
         """指定されたルール名のリストに基づき、適用すべきフォーマッターのリストを返す"""
         if 'all' in rule_names or not rule_names:
-            return [self._get_formatter_instance(name) for name in self._formatters_config.keys()]
+            target_rules = self._formatters_config.keys()
+        else:
+            target_rules = rule_names
 
-        return [self._get_formatter_instance(name) for name in rule_names]
+        return [self._get_formatter_instance(name) for name in target_rules]
 
     def build_rule_prompt(self) -> str:
         prompt_lines = ['---', '整形ルールを選択してください:']

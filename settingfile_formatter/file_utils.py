@@ -1,9 +1,9 @@
 import shutil
 from pathlib import Path
 
-def validate_and_prepare_file(file_path_str: str, overwrite: bool, backup: bool, prefix: str = 'fixed_') -> Path:
+def prepare_file(file_path: str, overwrite: bool, backup: bool, prefix: str = 'fixed_') -> Path:
     """ファイルの存在確認、バックアップ作成、出力ファイルパスの決定を行う"""
-    input_path = Path(file_path_str)
+    input_path = Path(file_path)
     if not input_path.is_file():
         raise FileNotFoundError(f'指定されたファイルが見つかりません: {input_path}')
 

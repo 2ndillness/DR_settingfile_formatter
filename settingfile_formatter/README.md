@@ -51,11 +51,11 @@ FrameRenderScript = Input { Value = "if check then\n    return valueTrue\nelse\n
 -- after
 FrameRenderScript = Input { 
     Value = 
-    "if check then\n" ..
-    "    return valueTrue\n" ..
-    "else\n" ..
-    "    return valueFalse\n" ..
-    "end\n",
+        "if check then\n" ..
+        "    return valueTrue\n" ..
+        "else\n" ..
+        "    return valueFalse\n" ..
+        "end\n",
 }
 ```
 - エスケープされた改行(`\n`)毎に分割し`..`演算子で結合した後実改行を挿入します。
@@ -70,16 +70,18 @@ UserControls = ordered() { aaa = { bbb = "ccc" }, ddd = { eee = 123, fff = true 
 ```lua
 -- after
 UserControls = ordered() {
-    aaa = { bbb = "ccc", },
+    aaa = { 
+        bbb = "ccc",
+    },
     ddd = {
         eee = 123,
         fff = true,
     },
 }
 ```
-- `xxx = {...}`内の要素数が1つの場合は1行で出力します。
+- ~~`xxx = {...}`内の要素数が1つの場合は1行で出力します。~~※廃止しました
 - 最終要素の後のカンマの有無に関わらず、最終要素の後にはカンマが付いた状態で出力します。  
-(`Lua`では許容されるため、将来的な編集時のカンマ忘れによる構文エラーを防ぐ目的)
+(`Lua`では許容されるため、将来的な編集時のカンマ忘れによる構文エラーを防ぐ目的 )
 ## ファイル構成
 ```Bash
 /
@@ -110,7 +112,7 @@ UserControls = ordered() {
 | user_controls|UserControls整形ルール|
 
 ## 使用方法
-1. 事前に`setting`ファイルを4スペースインデントに変換
+1. 事前に`setting`ファイルを4スペースインデントに変換 ( VSCode等のエディタで変換 )
 2. 任意のディレクトリにファイル構成図のようにファイルを配置し`CLI`から実行ファイルの`drsetfmt.py`を実行  
 #### 実行形式
 1. 対話モード
@@ -161,10 +163,18 @@ python drsetfmt.py -h
 python cfggen.py
 ```
 - `config.json`と`formatters/__init__.py`が最新状態に更新されます。
+## 更新履歴
+### 2025-06-28
+- `string_literal.py`
+  - キーと値の間にインデントを付けるように変更。バグフィックス
+- `user_controls.py`
+  - `string_literal.py`で整形済みの文字列リテラルが存在しても整形処理が崩れないように修正
+  - `xxx = {...}`内の要素数が1つの場合に1行で出力するのを廃止。要素数に関わらず複数行に展開して出力するように変更
+- 全体的にリファクタリング、`README.md`( このファイル )の更新
 ## 注意事項
 本スクリプトは4スペースインデントを想定しています。(`Lua`の推奨インデント )それ以外のインデントでは正常に整形されない場合があります。  
 また、`DaVinci Resolve`が出力する`setting`ファイルはタブインデントなので事前に4スペースインデントに変換しておく方が良いです。  
-タブをスペースに変換するのは`VSCode`が便利です。
+タブをスペースに変換するには`VSCode`等のテキストエディタを使用して下さい。
 
 このスクリプトには特別な使用条件はありません。自由にご使用・改変・配布していただいて構いませんが、作者自身の利用や再配布の自由は常に保証されるものとします。
 

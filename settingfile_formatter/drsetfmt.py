@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Tuple, List
 
 from config_loader import ConfigLoader, FormatterError
-from file_utils import validate_and_prepare_file
+from file_utils import prepare_file
 
 def parse_args(config: ConfigLoader) -> argparse.Namespace:
     """コマンドライン引数を解析する"""
@@ -23,14 +23,14 @@ def parse_args(config: ConfigLoader) -> argparse.Namespace:
     )
     return parser.parse_args()
 
-def prompt_user_for_settings(config: ConfigLoader) -> Tuple[str, bool, List[str]]:
+def get_cli_inputs(config: ConfigLoader) -> Tuple[str, bool, List[str]]:
     """対話形式でユーザーから設定を取得する"""
     print('=== settingファイル整形ツール ===')
     while True:
-        file_path_str = input('ファイルパスを入力してください: ').strip()
-        if Path(file_path_str).exists():
+        file_path = input('ファイルパスを入力してください: ').strip()
+        if Path(file_path).exists():
             break
-        print(f"エラー: ファイル '{file_path_str}' が見つかりません")
+        print(f"エラー: ファイル '{file_path}' が見つかりません")
 
     while True:
         choice = input('保存方式を選択してください (1:上書き / 2:別名): ').strip()
@@ -41,36 +41,38 @@ def prompt_user_for_settings(config: ConfigLoader) -> Tuple[str, bool, List[str]
     while True:
         print(config.build_rule_prompt())
         rule_input = input('適用するルール番号を選択してください(スペース区切りで複数可): ').strip()
-        choices = [c.strip() for c in rule_input.split() if c.strip()]
+        choices = rule_input.split()
 
         if not choices:
             print('エラー: ルール番号を入力してください')
             continue
 
         try:
-            selected_rules = config.get_rule_names_from_choices(choices)
+            selected_rules = config.get_rule_names(choices)
             break
         except ValueError as e:
             print(f'エラー: {e}')
 
-    return file_path_str, choice == '1', selected_rules
+    return file_path, choice == '1', selected_rules
 
 def apply_formatting(content: str, rules: List[str], config: ConfigLoader) -> str:
-    for f in config.get_formatters_by_rules(rules):
+    for f in config.get_formatters(rules):
         content = f.format_content(content)
     return content
 
-def process_file(file_path_str: str, overwrite: bool, backup: bool, rules: List[str], config: ConfigLoader):
-    output_path = validate_and_prepare_file(file_path_str, overwrite, backup)
-    input_path = Path(file_path_str)
+def process_file(file_path: str, overwrite: bool, backup: bool, rules: List[str], config: ConfigLoader):
+    output_path = prepare_file(file_path, overwrite, backup)
+    input_path = Path(file_path)
 
     try:
         content = input_path.read_text(encoding='utf-8')
     except Exception as e:
         raise IOError(f'ファイルの読み込みに失敗しました: {input_path}') from e
 
+    formatted_content = apply_formatting(content, rules, config)
+
     try:
-        output_path.write_text(apply_formatting(content, rules, config), encoding='utf-8')
+        output_path.write_text(formatted_content, encoding='utf-8')
     except Exception as e:
         raise IOError(f'ファイルの書き込みに失敗しました: {output_path}') from e
 
@@ -86,7 +88,7 @@ def main():
         if args.file:
             process_file(args.file, args.overwrite, args.backup, args.rule, config)
         else:
-            file_path, overwrite, rules = prompt_user_for_settings(config)
+            file_path, overwrite, rules = get_cli_inputs(config)
             process_file(file_path, overwrite, backup=False, rules=rules, config=config)
 
     except (FormatterError, FileNotFoundError, IOError, ValueError) as e:

@@ -1,114 +1,110 @@
 import re
-from collections import defaultdict
+from typing import List, Dict, Tuple
+
 from .base import ContentFormatter
 
 
 class StringLiteralFormatter(ContentFormatter):
+    """'\n'を含む文字列リテラルを複数行に整形する"""
 
-    def __init__(self):
-        super().__init__()
+    def _get_parent_indent(self, line_num: int, token_idx: int, lines: List[str], tokens_per_line: List[List[str]]) -> str:
+        """親ブロックのインデント文字列を取得する"""
+        nest_level = 0
 
-    def find_string_targets(self, line_tokens):
-        targets = []
-        stack = []
-        current_context = {'key': None, 'after_equals': False, 'nest_level': 0}
-        for line_num, tokens in enumerate(line_tokens):
-            for token in tokens:
-                if self._is_identifier(token):
-                    current_context['key'] = token
-                elif token == '=':
-                    current_context['after_equals'] = True
-                elif token == '{' or token == '}':
-                    current_context['nest_level'] = self.tokenizer.update_nest_level(token, current_context['nest_level'])
-                    if token == '{' and current_context['key']:
-                        stack.append((current_context['key'], line_num, current_context['nest_level'] - 1))
-                    elif token == '}' and stack:
-                        stack.pop()
-                    self._reset_context(current_context)
-                elif self._is_multiline_string(token, current_context['after_equals']):
-                    target = self._create_target(token, current_context['key'], stack, line_num)
-                    targets.append(target)
-                    self._reset_context(current_context)
-                else:
-                    self._reset_context(current_context)
+        def seek_indent(token: str, target_line_num: int) -> str | None:
+            nonlocal nest_level
+            nest_level = self.tokenizer.update_nest_level_reverse(token, nest_level)
+            if nest_level < 0 and token == '{':
+                parent_line = lines[target_line_num]
+                return " " * (len(parent_line) - len(parent_line.lstrip()))
+            return None
+
+        # 現在行を逆方向に検索
+        for i in range(token_idx - 1, -1, -1):
+            if (indent := seek_indent(tokens_per_line[line_num][i], line_num)) is not None:
+                return indent
+
+        # 前の行を逆方向に検索
+        for i in range(line_num - 1, -1, -1):
+            for token in reversed(tokens_per_line[i]):
+                if (indent := seek_indent(token, i)) is not None:
+                    return indent
+        return ""
+
+    def _find_targets(self, tokens_per_line: List[List[str]]) -> Dict[int, int]:
+        """整形対象の `key = "value\n..."` の位置を特定する"""
+        targets = {}
+        for line_num, tokens in enumerate(tokens_per_line):
+            for i in range(len(tokens) - 2):
+                # 連結済み(`..`)はスキップ
+                if i + 3 < len(tokens) and tokens[i+3] == '..':
+                    continue
+
+                if (tokens[i+1] == '=' and tokens[i+2].startswith('"') and '\\n' in tokens[i+2]):
+                    targets[line_num] = i
+                    break
         return targets
 
-    def _is_identifier(self, token):
-        return self.tokenizer.pattern.match(token) and (token[0].isalpha() or token[0] == '_')
+    def _split_line_tokens(self, tokens: List[str], key_idx: int) -> Tuple[List[str], List[str]]:
+        """トークンを後続部と閉じ括弧に分割"""
+        suffix_start = key_idx + 3
+        if suffix_start < len(tokens) and tokens[suffix_start] == ',':
+            suffix_start += 1
 
-    def _is_multiline_string(self, token, after_equals):
-        return after_equals and token.startswith('"') and '\\n' in token[1:-1]
+        brace_pos = next((i for i, t in enumerate(tokens) if t == '}'), -1)
 
-    def _reset_context(self, context):
-        context.update({'key': None, 'after_equals': False})
+        if brace_pos == -1 or brace_pos < suffix_start:
+            return tokens[suffix_start:], []
+        return tokens[suffix_start:brace_pos], tokens[brace_pos:]
 
-    def _create_target(self, token, key, stack, line_num):
-        parent_info = stack[-1] if stack else (None, None, 0)
-        return {
-            'key': key,
-            'value': token[1:-1],
-            'parent_key': parent_info[0],
-            'parent_line': parent_info[1],
-            'parent_indent': self.tokenizer.INDENT * parent_info[2],
-            'target_line': line_num
-        }
-
-    def format_string_literal(self, indent, key_part, value, add_comma=True):
-        lines = [f"{indent}{key_part}\n"]
-        parts = value.split('\\n')
-        for i, part in enumerate(parts):
-            is_last = (i == len(parts) - 1)
-            suffix = (',' if add_comma else '') if is_last else ' ..'
-            quote_content = f'"{part}\\n"' if not is_last else f'"{part}"'
-            lines.append(f"{indent}{quote_content}{suffix}\n")
+    def _build_multiline_string(self, key: str, value: str, indent: str) -> List[str]:
+        """複数行文字列を構築"""
+        parts = value[1:-1].split('\\n')
+        lines = [f"{indent}{key} ="]
+        lines.extend([
+            f'{indent}{self.tokenizer.INDENT}"{part}\\n" ..' if i < len(parts) - 1
+            else f'{indent}{self.tokenizer.INDENT}"{part}",'
+            for i, part in enumerate(parts)
+        ])
         return lines
 
-    def join_tokens_until_key(self, tokens, target_key):
-        result_tokens = []
-        for token in tokens:
-            if token == target_key:
-                break
-            result_tokens.append(token)
-        return ' '.join(result_tokens).strip()
-
-    def is_already_formatted(self, lines, idx):
-        if idx + 1 < len(lines):
-            if re.match(r'.+=\s*$', lines[idx]) and re.match(r'\s*".*', lines[idx + 1]):
-                return True
-        return False
+    def _recombine_tokens(self, tokens: List[str]) -> str:
+        """トークンを再結合（空白調整）"""
+        if not tokens: return ""
+        result = ' '.join(tokens)
+        result = re.sub(r'\s+([,;}])', r'\1', result)
+        result = re.sub(r'([({[])\s+', r'\1', result)
+        return result.strip()
 
     def format_content(self, content: str) -> str:
-        lines = content.splitlines(keepends=True)
-        line_tokens = self.tokenizer.tokenize_content(content)
-        targets = self.find_string_targets(line_tokens)
-        target_by_line = defaultdict(list)
-        for target in targets:
-            target_by_line[target['target_line']].append(target)
+        lines = content.splitlines()
+        tokens_per_line = self.tokenizer.tokenize_content(content)
 
-        fixed_lines = []
-        i = 0
-        while i < len(lines):
-            # 整形済みパターンならスキップ
-            if self.is_already_formatted(lines, i):
-                fixed_lines.append(lines[i])
-                fixed_lines.append(lines[i + 1])
-                i += 2
-                continue
-            if i in target_by_line:
-                for target in target_by_line[i]:
-                    indent = target['parent_indent'] + self.tokenizer.INDENT
-                    if target['parent_line'] == target['target_line']:
-                        parent_part = self.join_tokens_until_key(line_tokens[i], target['key'])
-                        fixed_lines.append(f"{target['parent_indent']}{parent_part}\n")
-                        fixed_lines.extend(
-                            self.format_string_literal(indent, f"{target['key']} =", target['value'])
-                        )
-                        fixed_lines.append(f"{target['parent_indent']}}},\n")
-                    else:
-                        fixed_lines.extend(
-                            self.format_string_literal(indent, f"{target['key']} =", target['value'])
-                        )
-            else:
-                fixed_lines.append(lines[i])
-            i += 1
-        return ''.join(fixed_lines)
+        targets = self._find_targets(tokens_per_line)
+        if not targets:
+            return content
+
+        for line_num in sorted(targets.keys(), reverse=True):
+            key_idx = targets[line_num]
+            tokens = tokens_per_line[line_num]
+            key, value = tokens[key_idx], tokens[key_idx + 2]
+
+            prefix = lines[line_num][:lines[line_num].find(key)]
+            parent_indent = self._get_parent_indent(line_num, key_idx, lines, tokens_per_line)
+            target_indent = parent_indent + self.tokenizer.INDENT
+            suffix_tokens, closing_tokens = self._split_line_tokens(tokens, key_idx)
+
+            new_lines = []
+            if prefix.strip():
+                new_lines.append(prefix.rstrip())
+
+            new_lines.extend(self._build_multiline_string(key, value, target_indent))
+
+            if suffix_tokens:
+                new_lines.append(f"{target_indent}{self._recombine_tokens(suffix_tokens)}")
+            if closing_tokens:
+                new_lines.append(f"{parent_indent}{self._recombine_tokens(closing_tokens)}")
+
+            lines[line_num:line_num+1] = new_lines
+
+        return "\n".join(lines)
