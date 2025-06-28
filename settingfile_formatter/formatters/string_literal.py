@@ -7,28 +7,27 @@ from .base import ContentFormatter
 class StringLiteralFormatter(ContentFormatter):
     """'\n'を含む文字列リテラルを複数行に整形する"""
 
+    def _check_brace_rev(self, token: str, nest_level: int) -> Tuple[bool, int]:
+        """逆方向に探索中に開き括弧を見つけたか判定し、更新後のネストレベルを返す"""
+        updated_level = self.tokenizer.update_nest_rev(token, nest_level)
+        found = updated_level < 0 and token == '{'
+        return found, updated_level
+
     def _get_parent_indent(self, line_num: int, token_idx: int, lines: List[str], tokens_per_line: List[List[str]]) -> str:
         """親ブロックのインデント文字列を取得する"""
         nest_level = 0
-
-        def seek_indent(token: str, target_line_num: int) -> str | None:
-            nonlocal nest_level
-            nest_level = self.tokenizer.update_nest_level_reverse(token, nest_level)
-            if nest_level < 0 and token == '{':
-                parent_line = lines[target_line_num]
-                return " " * (len(parent_line) - len(parent_line.lstrip()))
-            return None
-
         # 現在行を逆方向に検索
         for i in range(token_idx - 1, -1, -1):
-            if (indent := seek_indent(tokens_per_line[line_num][i], line_num)) is not None:
-                return indent
-
+            token = tokens_per_line[line_num][i]
+            found, nest_level = self._check_brace_rev(token, nest_level)
+            if found:
+                return " " * (len(lines[line_num]) - len(lines[line_num].lstrip()))
         # 前の行を逆方向に検索
         for i in range(line_num - 1, -1, -1):
             for token in reversed(tokens_per_line[i]):
-                if (indent := seek_indent(token, i)) is not None:
-                    return indent
+                found, nest_level = self._check_brace_rev(token, nest_level)
+                if found:
+                    return " " * (len(lines[i]) - len(lines[i].lstrip()))
         return ""
 
     def _find_targets(self, tokens_per_line: List[List[str]]) -> Dict[int, int]:
@@ -58,23 +57,20 @@ class StringLiteralFormatter(ContentFormatter):
         return tokens[suffix_start:brace_pos], tokens[brace_pos:]
 
     def _build_multiline_string(self, key: str, value: str, indent: str) -> List[str]:
-        """複数行文字列を構築"""
-        parts = value[1:-1].split('\\n')
-        lines = [f"{indent}{key} ="]
-        lines.extend([
-            f'{indent}{self.tokenizer.INDENT}"{part}\\n" ..' if i < len(parts) - 1
-            else f'{indent}{self.tokenizer.INDENT}"{part}",'
-            for i, part in enumerate(parts)
-        ])
-        return lines
+        """'\n'を含む文字列リテラルを複数行に整形する'"""
+        parts = value[1:-1].split(r'\n')
 
-    def _recombine_tokens(self, tokens: List[str]) -> str:
-        """トークンを再結合（空白調整）"""
-        if not tokens: return ""
-        result = ' '.join(tokens)
-        result = re.sub(r'\s+([,;}])', r'\1', result)
-        result = re.sub(r'([({[])\s+', r'\1', result)
-        return result.strip()
+        lines = [f"{indent}{key} ="]
+        child_indent = indent + self.tokenizer.INDENT
+        num_parts = len(parts)
+
+        for i, part in enumerate(parts):
+            is_last = (i == num_parts - 1)
+            quoted_part = f'"{part}\\n"' if not is_last else f'"{part}"'
+            separator = ' ..' if not is_last else ','
+            lines.append(f"{child_indent}{quoted_part}{separator}")
+
+        return lines
 
     def format_content(self, content: str) -> str:
         lines = content.splitlines()

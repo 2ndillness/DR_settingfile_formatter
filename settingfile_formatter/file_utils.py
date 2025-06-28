@@ -16,3 +16,17 @@ def prepare_file(file_path: str, overwrite: bool, backup: bool, prefix: str = 'f
             raise IOError(f'ファイルのバックアップに失敗しました: {backup_path}') from e
 
     return input_path if overwrite else input_path.parent / (prefix + input_path.name)
+
+def read_file_content(file_path: Path) -> str:
+    """ファイルを読み込み、その内容を返す"""
+    try:
+        return file_path.read_text(encoding='utf-8')
+    except Exception as e:
+        raise IOError(f'ファイルの読み込みに失敗しました: {file_path}') from e
+
+def write_file_content(file_path: Path, content: str):
+    """ファイルに内容を書き込む"""
+    try:
+        file_path.write_text(content, encoding='utf-8')
+    except Exception as e:
+        raise IOError(f'ファイルの書き込みに失敗しました: {file_path}') from e

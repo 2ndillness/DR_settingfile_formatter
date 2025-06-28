@@ -16,7 +16,7 @@ class Tokenizer:
         """括弧のネストレベルを更新 (順方向)"""
         return level + (1 if token == '{' else -1 if token == '}' else 0)
 
-    def update_nest_level_reverse(self, token: str, level: int) -> int:
+    def update_nest_rev(self, token: str, level: int) -> int:
         """括弧のネストレベルを更新 (逆方向)"""
         return level + (1 if token == '}' else -1 if token == '{' else 0)
 
@@ -100,3 +100,11 @@ class ContentFormatter(ABC):
         result.append(f"{indent}}},")
 
         return result
+
+    def _recombine_tokens(self, tokens: List[str]) -> str:
+        """トークンを再結合（空白調整）"""
+        if not tokens: return ""
+        result = ' '.join(tokens)
+        result = re.sub(r'\s+([,;}])', r'\1', result)
+        result = re.sub(r'([({[])\s+', r'\1', result)
+        return result.strip()
