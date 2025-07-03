@@ -30,12 +30,12 @@ def update_config_json(formatters):
     config = {"formatters": formatters}
     with CONFIG_PATH.open('w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
-    print(f"config.jsonを更新しました: {CONFIG_PATH}")
+    print(f'config.jsonを更新しました: {CONFIG_PATH}')
 
 def update_init_py(formatters):
     # base.pyのimportを先頭に追加
     lines = [
-        "from .base import ContentFormatter, Tokenizer"
+        'from .base import ContentFormatter, Tokenizer'
     ]
     # Formatterクラスのimport
     lines += [f"from .{key} import {val.split('.')[-1]}" for key, val in formatters.items()]
@@ -44,7 +44,7 @@ def update_init_py(formatters):
     lines.append(f"__all__ = [{', '.join(all_list)}]")
     with INIT_PATH.open('w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f"__init__.pyを更新しました: {INIT_PATH}")
+    print(f'__init__.pyを更新しました: {INIT_PATH}')
 
 def main():
     formatters = find_formatter_classes()

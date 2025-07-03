@@ -70,6 +70,7 @@ def get_interactive_inputs(config: ConfigLoader) -> Tuple[str, bool, bool, List[
 
 def apply_formatting(content: str, rules: List[str], config: ConfigLoader) -> str:
     """指定されたルールに従ってフォーマッターを適用する"""
+    content = content.expandtabs(4)     # タブを4スペースに変換
     for f in config.get_formatters(rules):
         content = f.format_content(content)
     return content
@@ -106,7 +107,7 @@ def main():
         print(f'\nエラー: {e}', file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
-        print("\n処理を中断しました。", file=sys.stderr)
+        print('\n処理を中断しました。', file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f'\n予期せぬエラーが発生しました: {e}', file=sys.stderr)

@@ -1,7 +1,12 @@
+from __future__ import annotations
 import json
 import importlib
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from formatters.base import ContentFormatter
+
 
 class FormatterError(Exception):
     pass
@@ -44,7 +49,7 @@ class ConfigLoader:
 
         return list(selected_rules)
 
-    def _get_formatter_instance(self, rule_name: str) -> Any:
+    def _get_formatter_instance(self, rule_name: str) -> ContentFormatter:
         if rule_name not in self._formatters_config:
             raise FormatterError(f"設定に存在しない整形ルールです: '{rule_name}'")
 
@@ -56,7 +61,7 @@ class ConfigLoader:
         except (ImportError, AttributeError) as e:
             raise FormatterError(f"整形ルール '{rule_name}' のクラス読み込みに失敗しました") from e
 
-    def get_formatters(self, rule_names: List[str]) -> List[Any]:
+    def get_formatters(self, rule_names: List[str]) -> List[ContentFormatter]:
         """指定されたルール名のリストに基づき、適用すべきフォーマッターのリストを返す"""
         if 'all' in rule_names or not rule_names:
             target_rules = self._formatters_config.keys()
