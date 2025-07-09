@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 class Tokenizer:
     """トークン化の共通処理を提供するクラス"""
 
-    TOKEN_PATTERN = r'([a-zA-Z_][a-zA-Z0-9_.]*)|("(?:\\.|[^"\\])*")|(\.\.)|([-+]?\d*\.?\d+)|([{}(),=\[\]])'
+    TOKEN_PATTERN = r'([a-zA-Z_][a-zA-Z0-9_.]*)|(".*?[^\\]")|(\.\.)|([-+]?\d*\.?\d+)|([{}(),=\[\]])'
     INDENT = '    '
 
     def __init__(self):
@@ -16,7 +16,7 @@ class Tokenizer:
         """括弧のネストレベルを更新 (順方向)"""
         return level + (1 if token == '{' else -1 if token == '}' else 0)
 
-    def update_nest_rev(self, token: str, level: int) -> int:
+    def update_nest_level_reverse(self, token: str, level: int) -> int:
         """括弧のネストレベルを更新 (逆方向)"""
         return level + (1 if token == '}' else -1 if token == '{' else 0)
 
@@ -93,28 +93,10 @@ class ContentFormatter(ABC):
         if current:
             elements.append(' '.join(current))
 
-        result = [f'{indent}{key} = {{']
+        result = [f"{indent}{key} = {{"]
         for elem in elements:
-            result.append(f'{indent}{self.tokenizer.INDENT}{elem},')
+            result.append(f"{indent}{self.tokenizer.INDENT}{elem},")
 
-        result.append(f'{indent}}},')
+        result.append(f"{indent}}},")
 
         return result
-
-    def _format_concat_string(self, key: str, parts: List[str], indent: str, add_comma: bool) -> List[str]:
-        """キーと文字列パーツから、複数行に連結された文字列を構築する"""
-        output_lines = [f'{indent}{key} =']
-        child_indent = indent + self.tokenizer.INDENT
-        num_parts = len(parts)
-        for i, part in enumerate(parts):
-            separator = ' ..' if i < num_parts - 1 else (',' if add_comma else '')
-            output_lines.append(f'{child_indent}{part}{separator}')
-        return output_lines
-
-    def _recombine_tokens(self, tokens: List[str]) -> str:
-        """トークンを再結合（空白調整）"""
-        if not tokens: return ''
-        result = ' '.join(tokens)
-        result = re.sub(r'\s+([,;}])', r'\1', result)
-        result = re.sub(r'([({[])\s+', r'\1', result)
-        return result.strip()

@@ -8,117 +8,143 @@ class UserControlsFormatter(ContentFormatter):
     BLOCK_START_TOKENS = ['UserControls', '=', 'ordered', '(', ')', '{']
 
     def format_content(self, content: str) -> str:
-        """コンテンツを整形"""
-        tokens_per_line = self.tokenizer.tokenize_content(content)
+        """コンテンツ整形処理のメインフロー"""
+        # 前処理: 複数行文字列をプレースホルダーに置換
+        replaced_content, placeholders = self._replace_multiline(content)
+
+        # メイン処理: ブロックの整形
+        tokens_per_line = self.tokenizer.tokenize_content(replaced_content)
         blocks = self._extract_blocks(tokens_per_line, self.BLOCK_START_TOKENS)
         if not blocks:
             return content
 
         result_lines = []
         last_end = -1
-        original_lines = content.splitlines()
+        original_lines = replaced_content.splitlines()
 
         for start, end in blocks:
             result_lines.extend(original_lines[last_end + 1:start])
-            indent_str = ' ' * (len(original_lines[start]) - len(original_lines[start].lstrip()))
+            indent = len(original_lines[start]) - len(original_lines[start].lstrip())
             block_tokens = tokens_per_line[start:end + 1]
-            formatted_block = self._format_block(block_tokens, indent_str)
+            formatted_block = self._format_block(block_tokens, ' ' * indent)
             result_lines.extend(formatted_block)
             last_end = end
 
         result_lines.extend(original_lines[last_end + 1:])
-        return '\n'.join(result_lines)
+        formatted_content = '\n'.join(result_lines)
 
-    def _format_block(self, block_tokens: List[List[str]], indent: str) -> List[str]:
-        """ブロックを整形"""
+        # 後処理: プレースホルダーを整形済みの複数行文字列に差し戻す
+        final_content = self.restore_placeholders(formatted_content, placeholders)
+
+        return final_content
+
+    def _replace_multiline(self, content: str) -> Tuple[str, List[str]]:
+        """'..'で連結された複数行文字列をプレースホルダーに置換する。"""
+        placeholders = []
+        def replacer(match):
+            key = match.group(1)
+            placeholders.append(match.group(0))
+            placeholder_iidx = len(placeholders) - 1
+            # 'key = "__PLACEHOLDER_n__"' の形式に変換
+            return f'{key} = "__PLACEHOLDER_{placeholder_iidx}__"'
+
+        # 任意のキー(group 1)に紐づく、'..'を1つ以上含む文字列連結(group 2)をキャプチャ
+        pattern = re.compile(
+            r'(\b[a-zA-Z_]\w*\b)\s*=\s*((?:"(?:\\.|[^"])*?"\s*\.\.\s*)+"(?:\\.|[^"])*?")',
+            re.DOTALL
+        )
+        replaced_content = pattern.sub(replacer, content)
+        return replaced_content, placeholders
+
+    def restore_placeholders(self, formatted_content: str, placeholders: List[str]) -> str:
+        """プレースホルダーを元に戻す"""
+        def unreplacer(match):
+            line_indent_str = match.group(1)
+            key = match.group(2)
+            index = int(match.group(3))
+            trailing_comma = match.group(4)
+
+            original_assignment = placeholders[index]
+            _key, value_part = original_assignment.split('=', 1)
+
+            parts = [p.strip() for p in value_part.split('..')]
+
+            value_indent_str = line_indent_str + self.tokenizer.INDENT
+
+            output_lines = [f"{line_indent_str}{key} ="]
+            for i, part in enumerate(parts):
+                separator = ' ..' if i < len(parts) - 1 else ''
+                output_lines.append(f"{value_indent_str}{part}{separator}")
+
+            output_lines[-1] += trailing_comma
+            return '\n'.join(output_lines)
+
+        # 任意のキー(group 2)に紐づくプレースホルダーを検出
+        pattern = re.compile(
+            r'(^\s*)(\b[a-zA-Z_]\w*\b)\s*=\s*"__PLACEHOLDER_(\d+)__"(,?)',
+            re.MULTILINE
+        )
+        return pattern.sub(unreplacer, formatted_content)
+
+    def _format_block(self, block_tokens: List[List[str]], base_indent: str) -> List[str]:
+        """ブロックの枠組みを整形"""
         all_tokens = [t for line in block_tokens for t in line]
         try:
             start_idx = all_tokens.index('{') + 1
             end_idx = len(all_tokens) - 1 - all_tokens[::-1].index('}')
             content_tokens = all_tokens[start_idx:end_idx]
         except ValueError:
-            return [f"{indent}UserControls = ordered() {{}}"]
+            return [f"{base_indent}UserControls = ordered() {{}}"]
 
-        result = [f"{indent}UserControls = ordered() {{"]
+        result = [f"{base_indent}UserControls = ordered() {{"]
         if content_tokens:
-            child_indent = indent + self.tokenizer.INDENT
-            result.extend(self._format_block_content(content_tokens, child_indent))
-        result.append(f"{indent}}}")
+            child_indent = base_indent + self.tokenizer.INDENT
+            result.extend(self._format_chunk_content(content_tokens, child_indent))
+        result.append(f"{base_indent}}}")
         return result
 
-    def _find_block_end(self, tokens: List[str], start_idx: int) -> int:
-        """ブロックチャンクの終了位置を検索"""
-        brace_start = start_idx + 2
-        brace_end = self.tokenizer.find_brace_end(tokens, brace_start)
-        if brace_end is None:
-            return start_idx + 1
-
-        end_idx = brace_end + 1
-        if end_idx < len(tokens) and tokens[end_idx] == ',':
-            end_idx += 1
-        return end_idx
-
-    def _find_simple_end(self, tokens: List[str], start_idx: int) -> int:
-        """単純代入チャンクの終了位置を検索"""
-        try:
-            return tokens.index(',', start_idx) + 1
-        except ValueError:
-            return len(tokens)
-
-    def _find_concat_end(self, tokens: List[str], start_idx: int) -> int:
-        """文字列連結チャンクの終了位置を検索"""
-        i = start_idx + 2
-        while i + 1 < len(tokens):
-            is_string = tokens[i].startswith('"')
-            is_concat_op = tokens[i+1] == '..'
-            if is_string and is_concat_op:
-                i += 2
-            else:
-                break
-        if i < len(tokens) and tokens[i].startswith('"'):
-            i += 1
-        if i < len(tokens) and tokens[i] == ',':
-            i += 1
-        return i
-
     def _chunk_tokens(self, tokens: List[str]) -> List[List[str]]:
-        """トークンを意味のあるチャンクに分割"""
+        """トークンリストを 'key = { ... }' または 'key = value,' 分割する。"""
         chunks, i = [], 0
         while i < len(tokens):
-            if i + 2 < len(tokens) and tokens[i+1] == '=':
-                start_idx = i
-                value_start_token = tokens[i+2]
-
-                if value_start_token == '{':
-                    end_idx = self._find_block_end(tokens, start_idx)
-                elif value_start_token.startswith('"') and i + 3 < len(tokens) and tokens[i+3] == '..':
-                    end_idx = self._find_concat_end(tokens, start_idx)
-                else:
-                    end_idx = self._find_simple_end(tokens, start_idx)
-
-                chunks.append(tokens[start_idx:end_idx])
-                i = end_idx
-            else:
+            start_idx = i
+            if not (i + 1 < len(tokens) and tokens[i+1] == '='):
                 i += 1
+                continue
+
+            value_start_idx = i + 2
+
+            # Case 1: key = { ... }
+            if value_start_idx < len(tokens) and tokens[value_start_idx] == '{':
+                brace_end = self.tokenizer.find_brace_end(tokens, value_start_idx)
+                if brace_end is not None:
+                    end_idx = brace_end + 1
+                    if end_idx < len(tokens) and tokens[end_idx] == ',':
+                        end_idx += 1
+                    chunks.append(tokens[start_idx:end_idx])
+                    i = end_idx
+                    continue
+
+            else:  # Case 2: key = value,
+                try:
+                    end_of_chunk = tokens.index(',', start_idx) + 1
+                except ValueError:
+                    end_of_chunk = len(tokens)
+                chunks.append(tokens[start_idx:end_of_chunk])
+                i = end_of_chunk
+                continue
+            i += 1 # フォールバック
         return chunks
 
-    def _format_block_content(self, tokens: List[str], indent: str) -> List[str]:
-        """ブロックコンテンツを整形"""
+    def _format_chunk_content(self, tokens: List[str], child_indent: str) -> List[str]:
+        """チャンク化されたトークンリストを整形し、文字列のリストとして返す"""
         result = []
         chunks = self._chunk_tokens(tokens)
         for chunk in chunks:
-            if len(chunk) > 3 and chunk[2] == '{':
+            if len(chunk) > 3 and chunk[2] == '{':  # key = { ... }チャンク
                 key = chunk[0]
-                add_comma = chunk[-1] == ','
-                inner_tokens = chunk[3:-2]
-                result.append(f"{indent}{key} = {{")
-                result.extend(self._format_block_content(inner_tokens, indent + self.tokenizer.INDENT))
-                result.append(f"{indent}}}{',' if add_comma else ''}")
-            elif '..' in chunk:
-                key = chunk[0]
-                parts = [token for token in chunk if token.startswith('"')]
-                add_comma = chunk[-1] == ','
-                result.extend(self._format_concat_string(key, parts, indent, add_comma))
-            else:
-                result.append(f"{indent}{self._recombine_tokens(chunk)}")
+                inner_tokens = chunk[3:-2]  # { と }, を除く
+                result.extend(self._format_multi_line(key, inner_tokens, child_indent, True))
+            else:  # key = valueチャンク
+                result.append(f"{child_indent}{' '.join(chunk)}")
         return result

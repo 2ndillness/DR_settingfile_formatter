@@ -7,45 +7,46 @@ from .base import ContentFormatter
 class StringLiteralFormatter(ContentFormatter):
     """'\n'を含む文字列リテラルを複数行に整形する"""
 
-    def _check_brace_rev(self, token: str, nest_level: int) -> Tuple[bool, int]:
-        """逆方向の括弧のネストをチェック"""
-        updated_level = self.tokenizer.update_nest_rev(token, nest_level)
-        found = updated_level < 0 and token == '{'
-        return found, updated_level
-
     def _get_parent_indent(self, line_num: int, token_idx: int, lines: List[str], tokens_per_line: List[List[str]]) -> str:
-        """親ブロックのインデントを取得"""
+        """親ブロックのインデント文字列を取得する"""
         nest_level = 0
+
+        def seek_indent(token: str, target_line_num: int) -> str | None:
+            nonlocal nest_level
+            nest_level = self.tokenizer.update_nest_level_reverse(token, nest_level)
+            if nest_level < 0 and token == '{':
+                parent_line = lines[target_line_num]
+                return " " * (len(parent_line) - len(parent_line.lstrip()))
+            return None
+
         # 現在行を逆方向に検索
         for i in range(token_idx - 1, -1, -1):
-            token = tokens_per_line[line_num][i]
-            found, nest_level = self._check_brace_rev(token, nest_level)
-            if found:
-                return ' ' * (len(lines[line_num]) - len(lines[line_num].lstrip()))
+            if (indent := seek_indent(tokens_per_line[line_num][i], line_num)) is not None:
+                return indent
+
         # 前の行を逆方向に検索
         for i in range(line_num - 1, -1, -1):
             for token in reversed(tokens_per_line[i]):
-                found, nest_level = self._check_brace_rev(token, nest_level)
-                if found:
-                    return ' ' * (len(lines[i]) - len(lines[i].lstrip()))
-        return ''
+                if (indent := seek_indent(token, i)) is not None:
+                    return indent
+        return ""
 
     def _find_targets(self, tokens_per_line: List[List[str]]) -> Dict[int, int]:
-        """整形対象の文字列リテラルを検索"""
+        """整形対象の `key = "value\n..."` の位置を特定する"""
         targets = {}
         for line_num, tokens in enumerate(tokens_per_line):
-            # 既に '..' 演算子で連結されている行は、整形済みとみなして全体をスキップ
-            if '..' in tokens:
-                continue
-
             for i in range(len(tokens) - 2):
+                # 連結済み(`..`)はスキップ
+                if i + 3 < len(tokens) and tokens[i+3] == '..':
+                    continue
+
                 if (tokens[i+1] == '=' and tokens[i+2].startswith('"') and '\\n' in tokens[i+2]):
                     targets[line_num] = i
                     break
         return targets
 
     def _split_line_tokens(self, tokens: List[str], key_idx: int) -> Tuple[List[str], List[str]]:
-        """行トークンを後続部と閉じ括弧に分割"""
+        """トークンを後続部と閉じ括弧に分割"""
         suffix_start = key_idx + 3
         if suffix_start < len(tokens) and tokens[suffix_start] == ',':
             suffix_start += 1
@@ -55,6 +56,25 @@ class StringLiteralFormatter(ContentFormatter):
         if brace_pos == -1 or brace_pos < suffix_start:
             return tokens[suffix_start:], []
         return tokens[suffix_start:brace_pos], tokens[brace_pos:]
+
+    def _build_multiline_string(self, key: str, value: str, indent: str) -> List[str]:
+        """複数行文字列を構築"""
+        parts = value[1:-1].split('\\n')
+        lines = [f"{indent}{key} ="]
+        lines.extend([
+            f'{indent}{self.tokenizer.INDENT}"{part}\\n" ..' if i < len(parts) - 1
+            else f'{indent}{self.tokenizer.INDENT}"{part}",'
+            for i, part in enumerate(parts)
+        ])
+        return lines
+
+    def _recombine_tokens(self, tokens: List[str]) -> str:
+        """トークンを再結合（空白調整）"""
+        if not tokens: return ""
+        result = ' '.join(tokens)
+        result = re.sub(r'\s+([,;}])', r'\1', result)
+        result = re.sub(r'([({[])\s+', r'\1', result)
+        return result.strip()
 
     def format_content(self, content: str) -> str:
         lines = content.splitlines()
@@ -78,23 +98,13 @@ class StringLiteralFormatter(ContentFormatter):
             if prefix.strip():
                 new_lines.append(prefix.rstrip())
 
-            # 1. 文字列をパーツに分割し、ダブルクォートで囲む
-            value_parts = value[1:-1].split(r'\n')
-            num_parts = len(value_parts)
-            parts = []
-            for i, part in enumerate(value_parts):
-                is_last = (i == num_parts - 1)
-                quoted_part = f'"{part}\\n"' if not is_last else f'"{part}"'
-                parts.append(quoted_part)
-
-            # 2. 複数行に連結された文字列を構築する
-            new_lines.extend(self._format_concat_string(key, parts, target_indent, add_comma=True))
+            new_lines.extend(self._build_multiline_string(key, value, target_indent))
 
             if suffix_tokens:
-                new_lines.append(f'{target_indent}{self._recombine_tokens(suffix_tokens)}')
+                new_lines.append(f"{target_indent}{self._recombine_tokens(suffix_tokens)}")
             if closing_tokens:
-                new_lines.append(f'{parent_indent}{self._recombine_tokens(closing_tokens)}')
+                new_lines.append(f"{parent_indent}{self._recombine_tokens(closing_tokens)}")
 
             lines[line_num:line_num+1] = new_lines
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
